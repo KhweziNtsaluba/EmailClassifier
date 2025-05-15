@@ -4,8 +4,6 @@ import {
   Paper, Input, Alert
 } from '@mui/material';
 
-const suspiciousWords = ['urgent', 'verify', 'login', 'click', 'account', 'update', 'test'];
-
 export default function PhishingEmailDetector() {
   const [tab, setTab] = useState(0);
   const [emailText, setEmailText] = useState('');
@@ -20,18 +18,28 @@ export default function PhishingEmailDetector() {
     setEmailText(text);
   };
 
-  const highlightWords = (text) => {
+  const highlightWords = (text, wordList) => {
     const words = text.split(/\s+/);
     return words.map((word, i) => {
-      const cleanWord = word.toLowerCase()
-      const isSuspicious = suspiciousWords.includes(cleanWord);
+      const cleanWord = word.toLowerCase();
+      // const isSuspicious = analysisResult.isSuspicious;
+
+      const wordWeight = wordList[cleanWord] ? wordList[cleanWord] : 0;
+      var backgroundColor = 'transparent';
+
+      if(wordWeight > 0){
+        backgroundColor = `rgba(255,0,0,${wordWeight/1.5})`; // red highlighting
+      }
+      else if (wordWeight < 0){
+        backgroundColor = `rgba(0,0,255,${Math.abs(wordWeight/1.5)})`; // blue highlighting
+      }
 
       // return list of highlighted words
       return (
         <span
           key={i}
           style={{
-            backgroundColor: isSuspicious ? 'rgba(255,0,0,0.3)' : 'transparent',
+            backgroundColor: backgroundColor,
             padding: '2px',
             borderRadius: '3px',
             marginRight: '4px'
@@ -45,29 +53,55 @@ export default function PhishingEmailDetector() {
 
 
   // classifies the email as phishing or benign (if suspicious word is in list)
-  const analyzeEmail = () => {
+  const analyzeEmail = (prediction) => {
+    console.log(prediction);
     const lower = emailText.toLowerCase();
-    const found = suspiciousWords.filter(w => lower.includes(w));
-    const isPhishing = found.length > 1;
+    const isPhishing = prediction['predicted_class'] === 1;
+    const confidence = prediction['confidence'];
+    const wordMap = prediction['list'];
+    const found = Object.entries(prediction['list'])
+      .filter(([word, weight]) => weight > 0.5 && lower.includes(word))
+      .map(([word]) => word);
 
     analyzedEmailText.current = emailText;
     setAnalysisResult({
       isPhishing,
       suspicious: found,
+      confidence: confidence,
+      wordWeightMap: wordMap
     });
   };
+
+  const handleSubmit = (subject, body) => {
+    fetch('http://localhost:8000/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          subject,
+          body
+        })
+    })
+    .then(response => response.json())
+    .then(json => analyzeEmail(json))
+    .catch(error => console.error(error));
+  }
   
+  const keydownHandler = (e) => {
+  console.log(`Pressed: ${e.key}`, e.ctrlKey);
+  if (e.key === 'Enter' && e.ctrlKey) {
+    console.log("CTRL+ENTER");
+    handleSubmit("email subject", emailText);
+  }
+};
+
   React.useEffect(() => {
     document.addEventListener('keydown', keydownHandler);
     return () => {
       document.removeEventListener('keydown', keydownHandler);
     }
   }, []);
-
-  const keydownHandler = (e) => {
-    if(e.key === 'Enter' && e.ctrlKey) analyzeEmail();
-  };
-
 
 
   return (
@@ -103,7 +137,7 @@ export default function PhishingEmailDetector() {
       <Button
         variant="contained"
         color="primary"
-        onClick={analyzeEmail}
+        onClick={() => handleSubmit("email subject", emailText)}
         disabled={!emailText.trim()}
       >
         Analyze Email
@@ -127,8 +161,8 @@ export default function PhishingEmailDetector() {
           <Typography variant="h6" mt={3}>
             Highlighted Email Content:
           </Typography>
-          <Paper variant="outlined" sx={{ p: 2, mt: 1, whiteSpace: 'pre-wrap' }}>
-            {highlightWords(analyzedEmailText.current)}
+          <Paper variant="outlined" sx={{ p: 2, mt: 1, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' }}>
+            {highlightWords(analyzedEmailText.current, analysisResult.wordWeightMap)}
           </Paper>
         </Box>
       )}

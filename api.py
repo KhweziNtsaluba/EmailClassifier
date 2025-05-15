@@ -11,8 +11,18 @@ import joblib
 from fastapi import FastAPI
 import uvicorn
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from lime.lime_text import LimeTextExplainer
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 REGEX_PATTERNS = {
     'currency': r'[$€£¥]\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s*(?:USD|EUR|GBP|JPY|CAD|AUD|CHF)',
@@ -89,12 +99,7 @@ def process_email_data(df):
         urls = extract_urls_from_text(body)
 
         for url in urls:
-            url_data.append({
-                'email_id': email_id,
-                'url': url,
-                'sender': row['sender'],
-                'label': row['label']
-            })
+            url_data.append(url)
 
         # Replace urls
         df.at[idx, 'body'] = replace_urls_with_tag(body)
@@ -116,7 +121,11 @@ def process_email_data(df):
 
 MODEL_PATH = "body_classifier.joblib"
 
-def predict(subject: str, body: str):
+def custom_tokenizer(text):
+    pattern = r"\[[^\]]+\]|<[^>]+>|\w+"
+    return re.findall(pattern, text)
+
+def predict(subject: str, body: str, num_features: int):
     email = {
         "subject": [subject],
         "body": [body]
@@ -129,16 +138,27 @@ def predict(subject: str, body: str):
 
     prediction = clf.predict([df.iloc[0]['body']])
     probability = clf.predict_proba([df.iloc[0]['body']])
+    explainer = LimeTextExplainer(class_names=["benign","phishing"], split_expression=custom_tokenizer)
+    exp = explainer.explain_instance(df.iloc[0]['body'], clf.predict_proba, num_features=num_features, labels=[1])
+    # normalizing weights
+    # Get the explanation for label 1 (e.g., "phishing")
+    word_weights = dict(exp.as_list())
+
+    # Normalize weights to range [-1, 1]
+    max_abs_weight = max(abs(w) for w in word_weights.values())
+    normalized_words = {word: weight / max_abs_weight for word, weight in word_weights.items()}
 
     return {
-        "predicted_class": int(prediction[0]),                 # convert from np.int64
-        "confidence": float(max(probability[0]))               # pick max prob for predicted class
+        "predicted_class": int(prediction[0]), 
+        "confidence": float(max(probability[0])),
+        "list": normalized_words
     }
 
 
 class Item(BaseModel):
     subject: str | None = None
     body: str
+    num_features: int = 10
 
 @app.get("/")
 async def root():
@@ -146,7 +166,7 @@ async def root():
 
 @app.post("/")
 async def classifyEmail(item: Item):
-    return predict(item.subject,item.body)
+    return predict(item.subject,item.body,item.num_features)
 
 if __name__ == "__main__":
    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
