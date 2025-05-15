@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import {
   Box, Button, Tabs, Tab, TextField, Typography,
-  Paper, Input, Alert
+  Paper, Input, Alert, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, LinearProgress, Card, CardContent, Divider
 } from '@mui/material';
 
 export default function PhishingEmailDetector() {
@@ -80,7 +81,8 @@ export default function PhishingEmailDetector() {
         },
         body: JSON.stringify({
           subject,
-          body
+          body,
+          "num_features":50
         })
     })
     .then(response => response.json())
@@ -88,20 +90,20 @@ export default function PhishingEmailDetector() {
     .catch(error => console.error(error));
   }
   
-  const keydownHandler = (e) => {
-  console.log(`Pressed: ${e.key}`, e.ctrlKey);
-  if (e.key === 'Enter' && e.ctrlKey) {
-    console.log("CTRL+ENTER");
-    handleSubmit("email subject", emailText);
-  }
-};
-
   React.useEffect(() => {
-    document.addEventListener('keydown', keydownHandler);
-    return () => {
-      document.removeEventListener('keydown', keydownHandler);
+  const handler = (e) => {
+    console.log(`Pressed: ${e.key}`, e.ctrlKey);
+    if (e.key === 'Enter' && e.ctrlKey) {
+      console.log("CTRL+ENTER");
+      handleSubmit("email subject", emailText);
     }
-  }, []);
+  };
+  
+  document.addEventListener('keydown', handler);
+  return () => {
+    document.removeEventListener('keydown', handler);
+  };
+}, [emailText]); 
 
 
   return (
@@ -157,13 +159,49 @@ export default function PhishingEmailDetector() {
               ? `Suspicious keywords found: ${analysisResult.suspicious.join(', ')}`
               : 'No suspicious keywords detected.'}
           </Typography>
+          <Box display="flex" gap={4} mt={3} alignItems="flex-start">
+  <Box flex={1}>
+    <Typography variant="h6" mb={1}>
+      Highlighted Email Content:
+    </Typography>
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2,
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'break-word',
+        height: '100%',
+      }}
+    >
+      {highlightWords(analyzedEmailText.current, analysisResult.wordWeightMap)}
+    </Paper>
+  </Box>
 
-          <Typography variant="h6" mt={3}>
-            Highlighted Email Content:
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2, mt: 1, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' }}>
-            {highlightWords(analyzedEmailText.current, analysisResult.wordWeightMap)}
-          </Paper>
+  <Box flex={2}>
+    <BarChart
+      width={300}
+      height={200}
+      data={Object.entries(analysisResult.wordWeightMap).map(([word, weight]) => ({
+        word,
+        weight,
+      }))}
+      layout="vertical"
+    >
+      <XAxis type="number" domain={[-1, 1]} />
+      <YAxis type="category" dataKey="word" />
+      <Tooltip />
+      <Bar dataKey="weight">
+        {Object.entries(analysisResult.wordWeightMap).map(([_, weight], index) => (
+          <Cell
+            key={`cell-${index}`}
+            fill={weight > 0 ? 'red' : '#8884d8'}
+          />
+        ))}
+      </Bar>
+    </BarChart>
+  </Box>
+</Box>
+
         </Box>
       )}
     </Box>

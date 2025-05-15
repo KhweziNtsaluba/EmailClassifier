@@ -122,7 +122,7 @@ def process_email_data(df):
 MODEL_PATH = "body_classifier.joblib"
 
 def custom_tokenizer(text):
-    pattern = r"\[[^\]]+\]|<[^>]+>|\w+"
+    pattern = r"\w+|[^\s\w]"
     return re.findall(pattern, text)
 
 def predict(subject: str, body: str, num_features: int):
@@ -138,10 +138,10 @@ def predict(subject: str, body: str, num_features: int):
 
     prediction = clf.predict([df.iloc[0]['body']])
     probability = clf.predict_proba([df.iloc[0]['body']])
-    explainer = LimeTextExplainer(class_names=["benign","phishing"], split_expression=custom_tokenizer)
+    explainer = LimeTextExplainer(class_names=["benign","phishing"], split_expression=custom_tokenizer, random_state=1)
     exp = explainer.explain_instance(df.iloc[0]['body'], clf.predict_proba, num_features=num_features, labels=[1])
+    
     # normalizing weights
-    # Get the explanation for label 1 (e.g., "phishing")
     word_weights = dict(exp.as_list())
 
     # Normalize weights to range [-1, 1]
