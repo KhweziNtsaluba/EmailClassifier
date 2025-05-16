@@ -77,8 +77,8 @@ def replace_urls_with_tag(text):
     if not isinstance(text, str):
         return text
 
-    url_pattern = re.compile(REGEX_PATTERNS['url'])
-    return url_pattern.sub('<URL>', text)
+    # url_pattern = re.compile(REGEX_PATTERNS['url'])
+    return re.sub(REGEX_PATTERNS['url'], '<URL>', text)
 
 
 def process_email_data(df):
@@ -102,16 +102,20 @@ def process_email_data(df):
             url_data.append(url)
 
         # Replace urls
-        df.at[idx, 'body'] = replace_urls_with_tag(body)
+        modified_body = replace_urls_with_tag(body)
 
         # Replace data categories
-        df.at[idx, 'body'] = replace_data_categories(row['body'])
+        modified_body = replace_data_categories(modified_body)
+
+        df.at[idx, 'body'] = modified_body
 
     # Lowercase
     df = to_lowercase(df)
 
     # Create URL dataframe
     url_df = pd.DataFrame(url_data)
+
+    print(url_df)
 
     print(f"Modified dataframe shape: {df.shape}")
     print(f"Columns: {df.columns.tolist()}")
@@ -122,7 +126,7 @@ def process_email_data(df):
 MODEL_PATH = "body_classifier.joblib"
 
 def custom_tokenizer(text):
-    pattern = r"\w+|[^\s\w]"
+    pattern = r"\[[^\]]+\]|<[^>]+>|\w+"
     return re.findall(pattern, text)
 
 def predict(subject: str, body: str, num_features: int):
