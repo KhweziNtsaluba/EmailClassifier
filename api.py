@@ -13,6 +13,7 @@ import uvicorn
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from lime.lime_text import LimeTextExplainer
+from urlFeaturizer import *
 
 app = FastAPI()
 
@@ -99,7 +100,7 @@ def process_email_data(df):
         urls = extract_urls_from_text(body)
 
         for url in urls:
-            url_data.append(url)
+            url_data.append({'url': url})
 
         # Replace urls
         modified_body = replace_urls_with_tag(body)
@@ -123,7 +124,23 @@ def process_email_data(df):
 
     return df, url_df
 
+def process_url_data(url_df):
+  featurizer = UrlFeaturizer()
+  features_list = []
+
+  for _, row in url_df.iterrows():
+      url = row['url']
+      
+      featurizer.setUrl(url)
+      features = featurizer.run()
+      features_list.append(features)
+
+
+  url_features_df = pd.DataFrame(features_list)
+  return url_features_df
+
 MODEL_PATH = "body_classifier.joblib"
+MODEL_PATH_URL = "mlp_url_classifier.joblib"
 
 def custom_tokenizer(text):
     pattern = r"\[[^\]]+\]|<[^>]+>|\w+"
@@ -138,12 +155,35 @@ def predict(subject: str, body: str, num_features: int):
     df = pd.DataFrame(email)
     df, url_df = process_email_data(df)
 
-    clf = joblib.load(MODEL_PATH)
+    original_urls = url_df['url'].tolist() if not url_df.empty else []
+    url_features_df = process_url_data(url_df)
 
+    clf = joblib.load(MODEL_PATH)
+    url_clf = joblib.load(MODEL_PATH_URL)
+
+    # Predictions for body
     prediction = clf.predict([df.iloc[0]['body']])
     probability = clf.predict_proba([df.iloc[0]['body']])
     explainer = LimeTextExplainer(class_names=["benign","phishing"], split_expression=custom_tokenizer, random_state=1)
     exp = explainer.explain_instance(df.iloc[0]['body'], clf.predict_proba, num_features=num_features, labels=[1])
+
+    # Predictions for URLs
+    url_predictions = []
+    
+    if not url_df.empty and len(url_features_df) > 0:
+        url_predictions_raw = url_clf.predict(url_features_df)
+        url_probabilities = url_clf.predict_proba(url_features_df)
+        
+        for i, url in enumerate(original_urls):
+            url_predictions.append({
+                "url": url,
+                "predicted_class": int(url_predictions_raw[i]),
+                "confidence": float(max(url_probabilities[i])),
+                "probabilities": {
+                    "benign": float(url_probabilities[i][0]),
+                    "phishing": float(url_probabilities[i][1])
+                }
+            })
     
     # normalizing weights
     word_weights = dict(exp.as_list())
@@ -155,7 +195,8 @@ def predict(subject: str, body: str, num_features: int):
     return {
         "predicted_class": int(prediction[0]), 
         "confidence": float(max(probability[0])),
-        "list": normalized_words
+        "list": normalized_words,
+        "url_predictions": url_predictions
     }
 
 
