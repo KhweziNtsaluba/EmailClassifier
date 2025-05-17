@@ -154,9 +154,9 @@ def predict(subject: str, body: str, num_features: int):
 
     df = pd.DataFrame(email)
     df, url_df = process_email_data(df)
+    url_features_df = process_url_data(url_df)
 
     original_urls = url_df['url'].tolist() if not url_df.empty else []
-    url_features_df = process_url_data(url_df)
 
     clf = joblib.load(MODEL_PATH)
     url_clf = joblib.load(MODEL_PATH_URL)
@@ -164,28 +164,39 @@ def predict(subject: str, body: str, num_features: int):
     # Predictions for body
     prediction = clf.predict([df.iloc[0]['body']])
     probability = clf.predict_proba([df.iloc[0]['body']])
+    email_phishing_prob = float(probability[0][1]) # Email body probability of phishing
+
     explainer = LimeTextExplainer(class_names=["benign","phishing"], split_expression=custom_tokenizer, random_state=1)
     exp = explainer.explain_instance(df.iloc[0]['body'], clf.predict_proba, num_features=num_features, labels=[1])
 
     # Predictions for URLs
     url_predictions = []
+    url_phishing_probs = []
     
     if not url_df.empty and len(url_features_df) > 0:
         url_predictions_raw = url_clf.predict(url_features_df)
         url_probabilities = url_clf.predict_proba(url_features_df)
         
         for i, url in enumerate(original_urls):
+            url_phishing_prob = float(url_probabilities[i][1]) # URL probability of phishing
+            url_phishing_probs.append(url_phishing_prob)
+
             url_predictions.append({
                 "url": url,
                 "predicted_class": int(url_predictions_raw[i]),
-                "confidence": float(max(url_probabilities[i])),
-                "probabilities": {
-                    "benign": float(url_probabilities[i][0]),
-                    "phishing": float(url_probabilities[i][1])
-                }
+                "phishing_probability": url_phishing_prob,
+                "benign_probability": float(url_probabilities[i][0]),
+                "confidence": float(max(url_probabilities[i]))
             })
+
+    # Hmmmmmm
+    if url_phishing_probs:
+        avg_url_phishing_prob = sum(url_phishing_probs) / len(url_phishing_probs)
+        overall_phishing_prob = (0.85 * email_phishing_prob) + (0.15 * avg_url_phishing_prob)
+    else:
+        overall_phishing_prob = email_phishing_prob
     
-    # normalizing weights
+    # Normalizing weights
     word_weights = dict(exp.as_list())
 
     # Normalize weights to range [-1, 1]
@@ -193,8 +204,10 @@ def predict(subject: str, body: str, num_features: int):
     normalized_words = {word: weight / max_abs_weight for word, weight in word_weights.items()}
 
     return {
-        "predicted_class": int(prediction[0]), 
-        "confidence": float(max(probability[0])),
+        "predicted_class": int(prediction[0]),
+        "phishing_probability": float(overall_phishing_prob),
+        "email_only_phishing_probability": email_phishing_prob,
+        "url_avg_phishing_probability": float(sum(url_phishing_probs) / len(url_phishing_probs)) if url_phishing_probs else None,
         "list": normalized_words,
         "url_predictions": url_predictions
     }
